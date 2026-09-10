@@ -6,12 +6,12 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
-// ฟังก์ชันหลักสำหรับรันบอทเติมเงิน
 async function runTopupBot(playerId, pinCode) {
     let browser;
     try {
         const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || null;
 
+        // ปรับแต่ง Flag ให้เบาที่สุด ประหยัด RAM ไม่ให้จอดำ
         browser = await puppeteer.launch({
             executablePath: executablePath,
             headless: true,
@@ -23,15 +23,29 @@ async function runTopupBot(playerId, pinCode) {
                 '--no-first-run',
                 '--no-zygote',
                 '--single-process',
-                '--disable-gpu'
+                '--disable-gpu',
+                '--disable-speech-api',
+                '--disable-background-networking'
             ]
         });
 
         const page = await browser.newPage();
-        await page.setViewport({ width: 1280, height: 800 });
+        
+        // บล็อกไม่ให้โหลดรูปและ CSS เพื่อให้บอททำงานไวขึ้น 3 เท่า และประหยัด RAM
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
+
+        // ตั้งเวลา Timeout ไว้ที่ 30 วินาที
+        page.setDefaultNavigationTimeout(30000);
 
         console.log(`[BOT] กำลังเริ่มเติมเงินสำหรับ UID: ${playerId}`);
-        await page.goto('https://httpbin.org/forms/post', { waitUntil: 'networkidle2' });
+        await page.goto('https://httpbin.org/forms/post', { waitUntil: 'domcontentloaded' });
 
         await page.waitForSelector('input[name="custname"]');
         await page.type('input[name="custname"]', playerId);
@@ -40,7 +54,7 @@ async function runTopupBot(playerId, pinCode) {
         await page.type('textarea[name="comments"]', pinCode);
 
         await Promise.all([
-            page.waitForNavigation({ waitUntil: 'networkidle2' }),
+            page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
             page.click('button')
         ]);
 
@@ -60,12 +74,10 @@ async function runTopupBot(playerId, pinCode) {
     }
 }
 
-// Route หน้าแรกสำหรับเช็คว่าเซิร์ฟเวอร์ยังทำงานอยู่ไหม
 app.get('/', (req, res) => {
     res.send('✅ Free Fire Topup Bot Server is Running (Free Tier)');
 });
 
-// Route สำหรับสั่งเติมเงินผ่าน URL /topup?uid=XXX&pin=YYY
 app.get('/topup', async (req, res) => {
     const { uid, pin } = req.query;
 
@@ -81,7 +93,5 @@ app.get('/topup', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`=========================================`);
     console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`=========================================`);
 });
